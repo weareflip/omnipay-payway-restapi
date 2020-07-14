@@ -452,45 +452,26 @@ abstract class AbstractRequest extends \Omnipay\Common\Message\AbstractRequest
      */
     public function sendData($data)
     {
-        // enforce TLS >= v1.2 (https://www.payway.com.au/rest-docs/index.html#basics)
-        $config = $this->httpClient->getConfig();
-        $curlOptions = $config->get('curl.options');
-        $curlOptions[CURLOPT_SSLVERSION] = 6;
-        $config->set('curl.options', $curlOptions);
-        $this->httpClient->setConfig($config);
-
-        // don't throw exceptions for 4xx errors
-        $this->httpClient->getEventDispatcher()->addListener(
-            'request.error',
-            function ($event) {
-                if ($event['response']->isClientError()) {
-                    $event->stopPropagation();
-                }
-            }
-        );
-
-        if ($this->getSSLCertificatePath()) {
-            $this->httpClient->setSslVerification($this->getSSLCertificatePath());
-        }
-
-        $request = $this->httpClient->createRequest(
-            $this->getHttpMethod(),
-            $this->getEndpoint(),
-            $this->getRequestHeaders(),
-            $data
-        );
-
         // get the appropriate API key
         $apikey = ($this->getUseSecretKey()) ? $this->getApiKeySecret() : $this->getApiKeyPublic();
-        $request->setHeader('Authorization', 'Basic ' . base64_encode($apikey . ':'));
 
-        // send the request
-        $response = $request->send();
+        $headers = array_merge($this->getRequestHeaders(), [
+            'Authorization' => 'Basic ' . base64_encode($apikey . ':')
+        ]);
 
-        $this->response = new Response($this, $response->json());
+        $body = $data ? http_build_query($data, '', '&') : null;
+        $httpResponse = $this->httpClient->request(
+            $this->getHttpMethod(),
+            $this->getEndpoint(),
+            $headers,
+            $body
+        );
 
-        // save additional info
-        $this->response->setHttpResponseCode($response->getStatusCode());
+        $data = $httpResponse->getBody()->getContents();
+
+        $this->response = new Response($this, json_decode($data, true), $httpResponse->getHeaders());
+
+        $this->response->setHttpResponseCode($httpResponse->getStatusCode());
         $this->response->setTransactionType($this->getTransactionType());
 
         return $this->response;
